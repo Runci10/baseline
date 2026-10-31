@@ -45,4 +45,7 @@ export const FITNESS: Fitness = {
   run: { distanceM: 5000, timeS: 22 * 60 + 20, source: "Garmin 5 km prediction" },
   lthr: 183,
   ftpW: 194,
+  equipment: "bodyweight",          // no gym membership at the moment
+  pullupBar: false,
+  bodyweight: {},                   // add max push-ups and max squats to set starting levels
 };

@@ -18,8 +18,12 @@ export interface Fitness {
   ftpW?: number;                                                  // cycling functional threshold power, W
   swimCssS?: number;                                              // critical swim speed, s per 100 m
   lifts?: Partial<Record<LiftId, number>>;                        // estimated one-rep max, kg
+  equipment?: Equipment;                                          // what the user can train with (default: gym)
+  pullupBar?: boolean;                                            // bodyweight: has a pull-up bar
+  bodyweight?: { pushups?: number; squats?: number; pullups?: number };  // max reps in one set
 }
 
+export type Equipment = "gym" | "dumbbells" | "bodyweight";
 export type LiftId = "squat" | "deadlift" | "bench" | "press" | "row";
 
 export interface Step {
@@ -271,9 +275,107 @@ const STRENGTH: Record<string, Record<"lower" | "upper" | "full", LiftPlan[]>> =
   },
 };
 
+/* ---------- Bodyweight and home strength ---------- */
+
+// Each movement is a ladder of harder variations. The user's level on each comes from a simple test
+// (max push-ups, max squats, max pull-ups); they move up a rung when every set reaches the top of the range.
+export const LADDERS = {
+  push: ["Incline push-up (hands on a bench or table)", "Push-up", "Feet-elevated push-up", "Archer push-up"],
+  squat: ["Bodyweight squat", "Split squat", "Bulgarian split squat (rear foot on a chair)", "Shrimp squat (hold a doorframe)"],
+  hinge: ["Glute bridge", "Single-leg glute bridge", "Single-leg Romanian deadlift (hold a backpack)", "Nordic curl lowering (feet under a couch)"],
+  pullBar: ["Pull-up lowering (jump up, lower in 5 s)", "Pull-up", "Pull-up with 3 s lowering", "Archer pull-up"],
+  pullNoBar: ["Inverted row under a sturdy table (knees bent)", "Inverted row under a sturdy table (legs straight)", "Inverted row, feet raised on a chair", "Single-arm towel row on a door"],
+} as const;
+
+const level = (v: number | undefined, cuts: number[], fallback: number) => (v == null ? fallback : cuts.filter(c => v >= c).length);
+
+export function bodyweightLevels(fit: Fitness) {
+  const bw = fit.bodyweight ?? {};
+  const push = level(bw.pushups, [8, 21, 36], 1);
+  const squat = level(bw.squats, [25, 50, 80], 1);
+  const pull = fit.pullupBar ? level(bw.pullups, [1, 6, 13], 0) : Math.min(push, 2);
+  return { push, squat, hinge: squat, pull };
+}
+
+type Move = { name: string; sets: number; lo: number; hi: number; unit?: string; next?: string };
+
+function bodyweightPlan(kind: "lower" | "upper" | "full", goal: string, fit: Fitness): Move[] {
+  const L = bodyweightLevels(fit);
+  const strong = goal === "strong";
+  const sets = goal === "general" ? 3 : 4;
+  const [lo, hi] = strong ? [5, 8] : goal === "muscle" ? [8, 15] : [8, 12];
+  const pullLadder = fit.pullupBar ? LADDERS.pullBar : LADDERS.pullNoBar;
+  const pick = (ladder: readonly string[], i: number, sideNote = ""): Move => ({
+    name: ladder[Math.min(i, ladder.length - 1)] + sideNote, sets, lo, hi, next: ladder[i + 1],
+  });
+  const each = " (each leg)";
+  const squat = pick(LADDERS.squat, L.squat, L.squat >= 1 ? each : "");
+  const hinge = pick(LADDERS.hinge, L.hinge, L.hinge === 1 || L.hinge === 2 ? each : "");
+  const push = pick(LADDERS.push, L.push);
+  const pull = { ...pick(pullLadder, L.pull), ...(fit.pullupBar && L.pull === 0 ? { lo: 3, hi: 5 } : {}) };
+  const plank: Move = { name: "Plank", sets: 3, lo: 30, hi: 60, unit: " s" };
+  if (kind === "lower") return [squat, hinge, { name: "Reverse lunge (each leg)", sets: 3, lo: 10, hi: 15 }, { name: "Single-leg calf raise on a step (each leg)", sets: 3, lo: 12, hi: 20 }, { name: "Side plank (each side)", sets: 2, lo: 20, hi: 45, unit: " s" }];
+  if (kind === "upper") return [push, pull, { name: "Pike push-up", sets: 3, lo: 6, hi: 12 }, { name: "Chair dip", sets: 3, lo: 8, hi: 15 }, plank];
+  return [squat, push, pull, hinge, plank];
+}
+
+const DUMBBELL: Record<"lower" | "upper" | "full", string[]> = {
+  lower: ["Goblet squat", "Dumbbell Romanian deadlift", "Dumbbell reverse lunge (each leg)", "Single-leg calf raise holding a dumbbell (each leg)"],
+  upper: ["Dumbbell floor press", "One-arm dumbbell row (each arm)", "Seated dumbbell shoulder press", "Push-up"],
+  full: ["Goblet squat", "Dumbbell floor press", "One-arm dumbbell row (each arm)", "Dumbbell Romanian deadlift", "Plank"],
+};
+
 function strengthTargets(s: Session, key: string, goal: string, fit: Fitness): SessionTargets {
   if (key === "light") {
     return { summary: "20 min mobility and core", steps: [{ label: "Main set", detail: "Hip and ankle mobility, dead bug, side plank, 2 rounds" }], effort: "RPE 2–3" };
+  }
+  const kind = (["lower", "upper", "full"].includes(key) ? key : "full") as "lower" | "upper" | "full";
+  const lighterDay = /lighter/.test(s.detail);
+  const equip = fit.equipment ?? "gym";
+  if (equip === "bodyweight" || equip === "dumbbells") {
+    const rirBase = goal === "general" ? 3 : 2;
+    const rirToday = lighterDay ? rirBase + 1 : rirBase;
+    const rest = goal === "strong" ? "2 min" : goal === "muscle" ? "60–90 s" : "60 s";
+    const tempo = goal === "strong" ? ", lower for 3 s" : "";
+    const steps: Step[] = [{ label: "Warm-up", detail: "5 min: 20 jumping jacks, 10 bodyweight squats, 10 arm circles, 2 rounds" }];
+    let note: string;
+    if (equip === "bodyweight") {
+      const moves = bodyweightPlan(kind, goal, fit);
+      for (const m of moves) {
+        const sets = lighterDay ? Math.max(2, m.sets - 1) : m.sets;
+        const lowering = m.name.startsWith("Pull-up lowering");
+        steps.push({
+          label: m.name,
+          detail: `${sets} × ${m.lo}–${m.hi}${m.unit ?? ""}, rest ${rest}${m.unit || lowering ? "" : tempo}`,
+          target: m.unit ? `${m.lo}–${m.hi}${m.unit}` : lowering ? `${m.lo}–${m.hi} reps, 5 s down each` : `${m.lo}–${m.hi} reps, ${rirToday} in reserve`,
+        });
+      }
+      const firstNext = moves.find(m => m.next);
+      note = !fit.bodyweight || fit.bodyweight.pushups == null || fit.bodyweight.squats == null
+        ? "Add your max push-ups and max squats on the Goals screen so each exercise starts at the right level."
+        : `When every set reaches the top of the range, move to the next variation${firstNext ? ` (for example ${firstNext.name.split(" (")[0].toLowerCase()} → ${firstNext.next!.split(" (")[0].toLowerCase()})` : ""}.`;
+      return {
+        summary: `${moves.length} bodyweight exercises, ${goal === "strong" ? "hard sets of 5–8" : goal === "muscle" ? "sets of 8–15" : "sets of 8–12"}${lighterDay ? ", lighter today" : ""}`,
+        steps,
+        effort: `RPE ${10 - rirToday} on the last set, ${rirToday} reps left in the tank`,
+        note,
+      };
+    }
+    const [lo, hi] = goal === "strong" ? [5, 8] : goal === "muscle" ? [8, 15] : [8, 12];
+    for (const name of DUMBBELL[kind]) {
+      const isPlank = name === "Plank", noWeight = name === "Push-up";
+      steps.push({
+        label: name,
+        detail: `${lighterDay ? 2 : 3} × ${isPlank ? "30–60 s" : `${lo}–${hi}`}, rest ${rest}${isPlank ? "" : tempo}`,
+        target: isPlank ? "30–60 s" : noWeight ? `${lo}–${hi} reps, ${rirToday} in reserve` : `a weight you could lift ${rirToday} more times`,
+      });
+    }
+    return {
+      summary: `${DUMBBELL[kind].length} dumbbell exercises, sets of ${lo}–${hi}${lighterDay ? ", lighter today" : ""}`,
+      steps,
+      effort: `RPE ${10 - rirToday} on the last set, ${rirToday} reps left in the tank`,
+      note: "When every set reaches the top of the range, use a heavier dumbbell or slow the lowering to 3 s.",
+    };
   }
   const g = STRENGTH[goal] ?? STRENGTH.general;
   const plan = g[(["lower", "upper", "full"].includes(key) ? key : "full") as "lower" | "upper" | "full"];
