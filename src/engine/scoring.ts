@@ -47,9 +47,12 @@ export function zScore(value: number, history: number[]): number {
 /**
  * Recovery (0–100): today's night compared with the previous nights (up to 30).
  * R = 50 + 15 × (0.45·zHRV − 0.25·zRHR + 0.20·zSleep − 0.10·zResp)
+ * HRV, resting HR and breathing rate are compared with the user's own history. Sleep is compared
+ * with sleep need (1 point per hour short, up to −3), because someone who has slept badly for weeks
+ * would otherwise see a short night as normal.
  * Weights are starting values, to be tuned against how users report feeling.
  */
-export function recoveryScore(today: NightInputs, history: NightInputs[]): RecoveryResult {
+export function recoveryScore(today: NightInputs, history: NightInputs[], sleepNeedHours = 7.5): RecoveryResult {
   const h = history.slice(-FULL_NIGHTS);
   const nights = h.length;
   if (nights < MIN_NIGHTS) {
@@ -58,7 +61,7 @@ export function recoveryScore(today: NightInputs, history: NightInputs[]): Recov
   const parts: Contribution[] = [
     { key: "hrv", label: "HRV", z: zScore(today.hrvMs, h.map(n => n.hrvMs)), points: 0 },
     { key: "restingHr", label: "Resting heart rate", z: zScore(today.restingHr, h.map(n => n.restingHr)), points: 0 },
-    { key: "sleep", label: "Sleep duration", z: zScore(today.sleepHours, h.map(n => n.sleepHours)), points: 0 },
+    { key: "sleep", label: "Sleep vs need", z: clamp(today.sleepHours - sleepNeedHours, -3, 1), points: 0 },
   ];
   const weights: Record<Contribution["key"], number> = { hrv: 0.45, restingHr: -0.25, sleep: 0.2, respRate: -0.1 };
   const resp = h.filter(n => n.respRate != null).map(n => n.respRate as number);

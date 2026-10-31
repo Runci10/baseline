@@ -5,7 +5,7 @@ import { buildWeek, SPORTS, DAY_NAMES } from "@/engine/plan";
 import { dayTargets, TIPS } from "@/engine/nutrition";
 import { bandOf } from "@/engine/scoring";
 import { sessionTargets } from "@/engine/targets";
-import { SNAPSHOT, DEFAULT_GOALS, FITNESS, sleepAvg7 } from "@/data/snapshot";
+import { TODAY as SNAPSHOT, DEFAULT_GOALS, FITNESS, sleepAvg7 } from "@/data/live";
 
 const light = { bg: "#F2F5F4", card: "#FFFFFF", line: "#D5DEDB", fg: "#13201D", muted: "#5A6B67", accent: "#1F6A86", accentSoft: "#D9EAF0", good: "#2A8F5F", warn: "#C28414", bad: "#C24E38" };
 const dark = { bg: "#0E1513", card: "#16201E", line: "#2A3835", fg: "#E4ECEA", muted: "#93A5A0", accent: "#6CB4D0", accentSoft: "#1B3540", good: "#5BC48F", warn: "#E5B04A", bad: "#E77C64" };
@@ -80,6 +80,12 @@ export default function TodayScreen() {
           • Training load is {SNAPSHOT.loadRatio.toFixed(1)}× your usual
           {SNAPSHOT.loadRatio < 0.8 ? ", below the 0.8–1.3 target, so there's room to build." : SNAPSHOT.loadRatio <= 1.3 ? ", inside the 0.8–1.3 target." : ", above the 0.8–1.3 target, so the plan eases off."}
         </Text>
+        {SNAPSHOT.recovery && SNAPSHOT.recovery.contributions.length ? (
+          <Text style={s.body}>
+            • What moved recovery today, against your last {SNAPSHOT.recovery.nights} nights:{" "}
+            {[...SNAPSHOT.recovery.contributions].sort((a, b) => Math.abs(b.points) - Math.abs(a.points)).map(c => `${c.label.toLowerCase()} ${c.points >= 0 ? "+" : "−"}${Math.abs(Math.round(c.points))}`).join(", ")}.
+          </Text>
+        ) : null}
         <Text style={s.body}>• Body battery is {SNAPSHOT.bodyBattery}. Aim for 7 h or more tonight.</Text>
         {next ? <Text style={s.body}>• Next up {dayName(nextIndex)}: {next.title.toLowerCase()}. {TIPS[next.kind]}</Text> : null}
       </View>
