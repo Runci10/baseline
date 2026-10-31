@@ -40,6 +40,8 @@ export interface Session {
   zone: number;       // 0–4 intensity
   minutes: number;
   met: number;        // energy cost, used by the nutrition engine
+  key?: string;       // session type within its sport (easy, hard, tempo, long, vo2, lower, upper, full, light)
+  goal?: string;      // the goal target this session serves (e.g. "10k"), used for exact targets
   priority?: number;
   light?: Session;    // easier version used when readiness is low
   moved?: boolean;
@@ -131,7 +133,8 @@ export function library(sport: SportId, target: string, minutes: number): Librar
       light: S("Mobility and core", "20 min, easy", "easy", 0, 20, 3),
       order: target === "general"
         ? [["full"], ["full", "full"], ["full", "upper", "full"], ["lower", "upper", "full", "upper"], ["lower", "upper", "full", "lower", "upper"]]
-        : [["full"], ["lower", "upper"], ["lower", "upper", "full"], ["lower", "upper", "lower", "upper"], ["lower", "upper", "full", "lower", "upper"]],
+        // Two sessions are both full body so each muscle is trained twice a week (Schoenfeld et al., 2016)
+        : [["full"], ["full", "full"], ["lower", "upper", "full"], ["lower", "upper", "lower", "upper"], ["lower", "upper", "full", "lower", "upper"]],
     };
   }
   return {
@@ -152,6 +155,9 @@ function costAt(week: Week, s: Session, d: number, longDays: number[]): number {
   if (isHeavy(s)) c += nb.filter(isHeavy).length * 4 + nb.filter(x => x.kind === "full").length * 2;
   if (s.kind === "full") c += nb.filter(isHeavy).length * 2;
   if (nb.some(x => x.sport === s.sport)) c += isHeavy(s) && nb.some(x => x.sport === s.sport && isHeavy(x)) ? 3 : 1;
+  // Strength days that work the same muscles need 48 h between them (lower + upper is fine)
+  const STR = ["lower", "upper", "full"];
+  if (STR.includes(s.kind)) c += nb.filter(x => STR.includes(x.kind) && !((x.kind === "lower" && s.kind === "upper") || (x.kind === "upper" && s.kind === "lower"))).length * 3;
   return c;
 }
 
@@ -219,7 +225,9 @@ export function buildWeek(g: Goals, input: WeekInputs): WeekResult {
   sp.forEach((x, i) => {
     if (!counts[i]) return;
     const L = library(x.id, x.target, g.minutes);
-    L.order[counts[i] - 1].forEach(key => sessions.push({ ...(L[key] as Session), priority: i, light: L.light }));
+    L.order[counts[i] - 1].forEach(key => sessions.push({
+      ...(L[key] as Session), key, goal: x.target, priority: i, light: { ...L.light, key: "light", goal: x.target },
+    }));
   });
 
   // 3. Place sessions: long first, then hard, then strength, then easy.

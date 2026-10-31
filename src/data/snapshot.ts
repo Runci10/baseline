@@ -35,3 +35,12 @@ export const DEFAULT_GOALS: Goals = {
   level: "intermediate",
   profile: { sex: "m", age: 25, heightCm: 188, weightKg: 80, activity: 1.35 },
 };
+
+// Current fitness for session targets, from Garmin on 31 October 2026.
+// Running uses Garmin's current 5 km prediction (22:20); the all-time best is 21:26.
+import type { Fitness } from "@/engine/targets";
+export const FITNESS: Fitness = {
+  run: { distanceM: 5000, timeS: 22 * 60 + 20, source: "Garmin 5 km prediction" },
+  lthr: 183,
+  ftpW: 194,
+};

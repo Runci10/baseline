@@ -4,7 +4,8 @@ import { ScrollView, View, Text, StyleSheet, useColorScheme } from "react-native
 import { buildWeek, SPORTS, DAY_NAMES } from "@/engine/plan";
 import { dayTargets, TIPS } from "@/engine/nutrition";
 import { bandOf } from "@/engine/scoring";
-import { SNAPSHOT, DEFAULT_GOALS, sleepAvg7, sleepPrior6 } from "@/data/snapshot";
+import { sessionTargets } from "@/engine/targets";
+import { SNAPSHOT, DEFAULT_GOALS, FITNESS, sleepAvg7, sleepPrior6 } from "@/data/snapshot";
 
 const light = { bg: "#F2F5F4", card: "#FFFFFF", line: "#D5DEDB", fg: "#13201D", muted: "#5A6B67", accent: "#1F6A86", accentSoft: "#D9EAF0", good: "#2A8F5F", warn: "#C28414", bad: "#C24E38" };
 const dark = { bg: "#0E1513", card: "#16201E", line: "#2A3835", fg: "#E4ECEA", muted: "#93A5A0", accent: "#6CB4D0", accentSoft: "#1B3540", good: "#5BC48F", warn: "#E5B04A", bad: "#E77C64" };
@@ -23,6 +24,7 @@ export default function TodayScreen() {
   const nextIndex = plan.week.findIndex((x, i) => i > 0 && x && x.sport);
   const next = nextIndex > 0 ? plan.week[nextIndex] : null;
   const adjusted = !!session && (session.swappedIn || !!session.replaced);
+  const targets = sessionTargets(session, session?.goal ?? "", FITNESS);
 
   const Score = ({ label, value, unit }: { label: string; value: number; unit: string }) => (
     <View style={s.score}>
@@ -63,7 +65,23 @@ export default function TodayScreen() {
           {session?.sport ? SPORTS[session.sport].name.toUpperCase() : "REST"} · {adjusted ? "ADJUSTED" : "AS PLANNED"}
         </Text>
         <Text style={s.h2}>{session ? session.title : "Rest day"}</Text>
-        <Text style={s.muted}>{session ? session.detail : "Recovery and mobility"}</Text>
+        {targets ? (
+          <View style={s.steps}>
+            {targets.steps.map((st, i) => (
+              <View key={i} style={s.stepRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={s.stepLabel}>{st.label}</Text>
+                  <Text style={s.muted}>{st.detail}</Text>
+                </View>
+                {st.target ? <Text style={s.stepTarget}>{st.target}</Text> : null}
+              </View>
+            ))}
+            <Text style={s.muted}>Effort: {targets.effort}{targets.distanceKm ? ` · about ${targets.distanceKm.toFixed(1)} km` : ""}</Text>
+            {targets.note ? <Text style={[s.muted, { color: c.accent }]}>{targets.note}</Text> : null}
+          </View>
+        ) : (
+          <Text style={s.muted}>{session ? session.detail : "Recovery and mobility"}</Text>
+        )}
         <View style={s.fuelBox}>
           <Text style={s.label}>FUEL TODAY · {fuel.carbLevel.toUpperCase()} CARB</Text>
           <View style={s.fuelRow}>
@@ -81,7 +99,10 @@ export default function TodayScreen() {
         {plan.week.map((x, i) => (
           <View key={i} style={s.weekRow}>
             <Text style={[s.weekDay, i === 0 && { color: c.accent }]}>{DAY_NAMES[i]}</Text>
-            <Text style={[s.body, { flex: 1 }]}>{x ? x.title : "Rest"}{x?.moved ? "  ·  moved" : ""}</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={s.body}>{x ? x.title : "Rest"}{x?.moved ? "  ·  moved" : ""}</Text>
+              {x ? <Text style={s.muted}>{sessionTargets(x, x.goal ?? "", FITNESS)?.summary}</Text> : null}
+            </View>
             <Text style={s.muted}>{dayTargets(x, goals).kcal.toLocaleString()} kcal</Text>
           </View>
         ))}
@@ -116,5 +137,9 @@ const styles = (c: Palette) =>
     fuelRow: { flexDirection: "row", flexWrap: "wrap", gap: 14 },
     fuelNum: { fontSize: 17, fontWeight: "500", color: c.fg },
     weekRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 6, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.line },
+    steps: { gap: 10, marginTop: 4 },
+    stepRow: { flexDirection: "row", gap: 12, alignItems: "flex-start", paddingTop: 8, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.line },
+    stepLabel: { fontSize: 14, fontWeight: "600", color: c.fg },
+    stepTarget: { fontSize: 14, fontWeight: "600", color: c.accent, textAlign: "right", maxWidth: "45%", fontVariant: ["tabular-nums"] },
     weekDay: { width: 36, fontSize: 13, fontWeight: "600", color: c.muted },
   });
