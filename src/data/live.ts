@@ -110,4 +110,14 @@ export const FITNESS: Fitness = { ...FITNESS_SETTINGS, lthr: g.zones?.lthr ?? FI
 /** Latest weight from Garmin, if any. */
 export const LATEST_WEIGHT = g.weights?.length ? g.weights[g.weights.length - 1] : null;
 
-export { DEFAULT_GOALS };
+/** Goals with body weight from the latest Garmin weigh-in, so calories and protein follow it. */
+const goalsWithWeight = (() => {
+  if (!LATEST_WEIGHT) return DEFAULT_GOALS;
+  const kg = LATEST_WEIGHT.kg;
+  return {
+    ...DEFAULT_GOALS,
+    profile: { ...DEFAULT_GOALS.profile, weightKg: kg },
+    targetWeightKg: DEFAULT_GOALS.aim === "maintain" ? kg : DEFAULT_GOALS.targetWeightKg,
+  };
+})();
+export { goalsWithWeight as DEFAULT_GOALS };

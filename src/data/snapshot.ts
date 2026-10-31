@@ -30,12 +30,12 @@ export const DEFAULT_GOALS: Goals = {
   ],
   aim: "maintain",
   rateKgPerWeek: 0.25,
-  targetWeightKg: 80,
+  targetWeightKg: 75.7,
   days: [0, 2, 4, 5, 6],
   longDays: [5, 6],
   minutes: 60,
   level: "intermediate",
-  profile: { sex: "m", age: 25, heightCm: 188, weightKg: 80, activity: 1.35 },
+  profile: { sex: "m", age: 25, heightCm: 188, weightKg: 75.7, activity: 1.35 },   // Garmin weigh-in 31 Oct
 };
 
 // Current fitness for session targets, from Garmin on 31 October 2026.
