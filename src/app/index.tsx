@@ -5,11 +5,24 @@ import { buildWeek, SPORTS, DAY_NAMES } from "@/engine/plan";
 import { dayTargets, TIPS } from "@/engine/nutrition";
 import { bandOf } from "@/engine/scoring";
 import { sessionTargets } from "@/engine/targets";
-import { SNAPSHOT, DEFAULT_GOALS, FITNESS, sleepAvg7, sleepPrior6 } from "@/data/snapshot";
+import { SNAPSHOT, DEFAULT_GOALS, FITNESS, sleepAvg7 } from "@/data/snapshot";
 
 const light = { bg: "#F2F5F4", card: "#FFFFFF", line: "#D5DEDB", fg: "#13201D", muted: "#5A6B67", accent: "#1F6A86", accentSoft: "#D9EAF0", good: "#2A8F5F", warn: "#C28414", bad: "#C24E38" };
 const dark = { bg: "#0E1513", card: "#16201E", line: "#2A3835", fg: "#E4ECEA", muted: "#93A5A0", accent: "#6CB4D0", accentSoft: "#1B3540", good: "#5BC48F", warn: "#E5B04A", bad: "#E77C64" };
 type Palette = typeof light;
+
+/** Training days are weekdays (0 = Monday); the plan runs for the 7 days starting today. */
+function fromToday(goals: typeof DEFAULT_GOALS, todayDow: number) {
+  const shift = (d: number) => (d - todayDow + 7) % 7;
+  return { ...goals, days: goals.days.map(shift), longDays: goals.longDays.map(shift) };
+}
+
+function hrvPosition(v: number, [lo, hi]: readonly [number, number]) {
+  if (v < lo) return "below";
+  if (v > hi) return "above";
+  const f = (v - lo) / (hi - lo);
+  return f > 0.67 ? "near the top of" : f < 0.33 ? "near the bottom of" : "in the middle of";
+}
 
 const hoursLabel = (h: number) => `${Math.floor(h)} h ${String(Math.round((h % 1) * 60)).padStart(2, "0")}`;
 
@@ -17,8 +30,12 @@ export default function TodayScreen() {
   const c = useColorScheme() === "dark" ? dark : light;
   const s = styles(c);
 
+  const todayDate = new Date(`${SNAPSHOT.date}T12:00:00`);
+  const todayDow = (todayDate.getDay() + 6) % 7;            // 0 = Monday
+  const dayName = (i: number) => DAY_NAMES[(todayDow + i) % 7];
+  const dateLabel = todayDate.toLocaleDateString("en-AU", { weekday: "long", day: "numeric", month: "long" });
   const goals = DEFAULT_GOALS;
-  const plan = buildWeek(goals, { readiness: SNAPSHOT.readiness, sleepAvg7, loadRatio: SNAPSHOT.loadRatio, today: SNAPSHOT.date });
+  const plan = buildWeek(fromToday(goals, todayDow), { readiness: SNAPSHOT.readiness, sleepAvg7, loadRatio: SNAPSHOT.loadRatio, today: SNAPSHOT.date });
   const session = plan.week[0];
   const fuel = dayTargets(session, goals);
   const nextIndex = plan.week.findIndex((x, i) => i > 0 && x && x.sport);
@@ -45,7 +62,7 @@ export default function TodayScreen() {
   return (
     <ScrollView style={{ backgroundColor: c.bg }} contentContainerStyle={s.page} contentInsetAdjustmentBehavior="automatic">
       <Text style={s.title}>Good morning, Will</Text>
-      <Text style={s.muted}>Monday 26 October · {SNAPSHOT.syncedLabel}</Text>
+      <Text style={s.muted}>{dateLabel} · {SNAPSHOT.syncedLabel}</Text>
 
       <View style={s.row}>
         <Score label="RECOVERY" value={SNAPSHOT.readiness} unit="of 100" />
@@ -54,10 +71,17 @@ export default function TodayScreen() {
 
       <View style={[s.card, { backgroundColor: c.accentSoft, borderColor: c.accentSoft }]}>
         <Text style={[s.h2, { color: c.accent }]}>Today's insight</Text>
-        <Text style={s.body}>Your body is coping well with training, but sleep is holding you back. The six nights before last night averaged {sleepPrior6.toFixed(1)} h.</Text>
-        <Text style={s.body}>• HRV is {SNAPSHOT.hrvMs} ms, at the top of your normal range ({SNAPSHOT.hrvRange[0]}–{SNAPSHOT.hrvRange[1]} ms).</Text>
-        <Text style={s.body}>• Body battery is {SNAPSHOT.bodyBattery}, so keep today light.</Text>
-        {next ? <Text style={s.body}>• Next up {DAY_NAMES[nextIndex]}: {next.title.toLowerCase()}. {TIPS[next.kind]}</Text> : null}
+        <Text style={s.body}>
+          Recovery is {SNAPSHOT.readiness}{SNAPSHOT.readiness < 34 ? ", so today is a rest day" : SNAPSHOT.readiness < 67 ? ", so keep today easy" : " and you're ready to train"}.
+          {sleepAvg7 < 6 ? ` Sleep is the main thing holding you back: the last seven nights averaged ${sleepAvg7.toFixed(1)} h.` : ""}
+        </Text>
+        <Text style={s.body}>• HRV is {SNAPSHOT.hrvMs} ms, {hrvPosition(SNAPSHOT.hrvMs, SNAPSHOT.hrvRange)} your normal range ({SNAPSHOT.hrvRange[0]}–{SNAPSHOT.hrvRange[1]} ms). Resting heart rate is {SNAPSHOT.restingHr} bpm.</Text>
+        <Text style={s.body}>
+          • Training load is {SNAPSHOT.loadRatio.toFixed(1)}× your usual
+          {SNAPSHOT.loadRatio < 0.8 ? ", below the 0.8–1.3 target, so there's room to build." : SNAPSHOT.loadRatio <= 1.3 ? ", inside the 0.8–1.3 target." : ", above the 0.8–1.3 target, so the plan eases off."}
+        </Text>
+        <Text style={s.body}>• Body battery is {SNAPSHOT.bodyBattery}. Aim for 7 h or more tonight.</Text>
+        {next ? <Text style={s.body}>• Next up {dayName(nextIndex)}: {next.title.toLowerCase()}. {TIPS[next.kind]}</Text> : null}
       </View>
 
       <View style={s.card}>
@@ -98,7 +122,7 @@ export default function TodayScreen() {
         <Text style={s.h2}>This week</Text>
         {plan.week.map((x, i) => (
           <View key={i} style={s.weekRow}>
-            <Text style={[s.weekDay, i === 0 && { color: c.accent }]}>{DAY_NAMES[i]}</Text>
+            <Text style={[s.weekDay, i === 0 && { color: c.accent }]}>{i === 0 ? "Today" : dayName(i)}</Text>
             <View style={{ flex: 1 }}>
               <Text style={s.body}>{x ? x.title : "Rest"}{x?.moved ? "  ·  moved" : ""}</Text>
               {x ? <Text style={s.muted}>{sessionTargets(x, x.goal ?? "", FITNESS)?.summary}</Text> : null}
@@ -141,5 +165,5 @@ const styles = (c: Palette) =>
     stepRow: { flexDirection: "row", gap: 12, alignItems: "flex-start", paddingTop: 8, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.line },
     stepLabel: { fontSize: 14, fontWeight: "600", color: c.fg },
     stepTarget: { fontSize: 14, fontWeight: "600", color: c.accent, textAlign: "right", maxWidth: "45%", fontVariant: ["tabular-nums"] },
-    weekDay: { width: 36, fontSize: 13, fontWeight: "600", color: c.muted },
+    weekDay: { width: 46, fontSize: 13, fontWeight: "600", color: c.muted },
   });
