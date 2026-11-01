@@ -25,7 +25,7 @@ export const sleepPrior6 = SNAPSHOT.sleepHours.slice(0, 6).reduce((a, b) => a + 
 // Starting goals: placeholders to edit. Days and long days come from Garmin settings.
 export const DEFAULT_GOALS: Goals = {
   sports: [
-    { id: "run", target: "10k" },
+    { id: "run", target: "5k", targetTimeS: 20 * 60 },   // long-standing goal: 5 km in 20:00, no race date
     { id: "strength", target: "general" },
   ],
   aim: "maintain",
