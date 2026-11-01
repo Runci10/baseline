@@ -18,6 +18,7 @@ export interface Fitness {
   ftpW?: number;                                                  // cycling functional threshold power, W
   swimCssS?: number;                                              // critical swim speed, s per 100 m
   lifts?: Partial<Record<LiftId, number>>;                        // estimated one-rep max, kg
+  asOf?: string;                                                  // today's date, YYYY-MM-DD (for weeks to race)
   equipment?: Equipment;                                          // what the user can train with (default: gym)
   pullupBar?: boolean;                                            // bodyweight: has a pull-up bar
   bodyweight?: { pushups?: number; squats?: number; pullups?: number };  // max reps in one set
@@ -150,69 +151,151 @@ export function sessionTargets(s: Session | null, goalTarget: string, fit: Fitne
   }
 }
 
-function runTargets(s: Session, key: string, goal: string, fit: Fitness): SessionTargets {
-  const hr = fit.lthr ? hrZones(fit.lthr) : null;
-  const easyHr = hr ? `HR under ${hr.z2[1]}` : "conversational";
-  if (!fit.run) {
-    return {
-      summary: `${s.title}, ${s.minutes} min by feel`,
-      steps: [{ label: "Main set", detail: s.detail, target: hr ? easyHr : "RPE from the effort line" }],
-      effort: s.kind === "hard" ? "RPE 8 on the hard parts" : "RPE 3–4, able to talk in full sentences",
-      note: "Add a recent 5 km time or time trial on the Goals screen to get exact paces.",
-    };
-  }
-  const p = runPaces(fit.run.distanceM, fit.run.timeS);
-  const easy = paceRange(p.easy[0], p.easy[1]);
-  const easyMid = (p.easy[0] + p.easy[1]) / 2;
-  const warm: Step = { label: "Warm-up", detail: "15 min easy, then 4 × 20 s strides with 40 s walk", target: easy };
-  const cool: Step = { label: "Cool-down", detail: "10 min easy", target: easy };
+/* ---------- Race goals ---------- */
 
-  if (key === "easy" || key === "light") {
+export const RACE_DISTANCE: Record<string, number> = { "5k": 5000, "10k": 10000, half: 21097.5, marathon: 42195 };
+export const RACE_NAME: Record<string, string> = { "5k": "5 km", "10k": "10 km", half: "half marathon", marathon: "marathon" };
+
+export interface RaceGoal {
+  target: string;
+  distanceM: number;
+  goalTimeS: number;
+  goalPace: number;            // s per km
+  currentTimeS: number;        // predicted from current fitness
+  currentPace: number;
+  vdotGap: number;             // goal VDOT minus current VDOT
+  weeksLeft: number | null;
+  weeksNeeded: number;         // at about 1 VDOT per 5 weeks
+  verdict: "in reach" | "realistic" | "ambitious" | "unlikely";
+  realisticTimeS: number | null;  // what current fitness plus the time left suggests, when the goal is unlikely
+  splits: { label: string; timeS: number }[];
+}
+
+const VDOT_PER_WEEK = 1 / 5;   // Baseline's planning estimate for a trained recreational runner
+
+/** Compare a race goal with current fitness. Needs a current 5 km (or other) time in fitness. */
+export function raceGoal(target: string, goalTimeS: number | undefined, goalDate: string | undefined, fit: Fitness): RaceGoal | null {
+  const dist = RACE_DISTANCE[target];
+  if (!dist || !goalTimeS || !fit.run) return null;
+  const p = runPaces(fit.run.distanceM, fit.run.timeS);
+  const current = p.race[target as keyof RunPaces["race"]];
+  const gap = vdot(dist, goalTimeS) - p.vdot;
+  const weeksLeft = goalDate && fit.asOf ? Math.max(0, Math.round((Date.parse(goalDate) - Date.parse(fit.asOf)) / 6048e5)) : null;
+  const weeksNeeded = Math.max(0, Math.ceil(gap / VDOT_PER_WEEK));
+  const verdict: RaceGoal["verdict"] = gap <= 0 ? "in reach"
+    : weeksLeft == null ? "realistic"
+    : gap <= weeksLeft * VDOT_PER_WEEK ? "realistic"
+    : gap <= weeksLeft * VDOT_PER_WEEK * 1.6 ? "ambitious" : "unlikely";
+  const realisticTimeS = verdict === "unlikely" && weeksLeft != null ? predictTime(dist, p.vdot + weeksLeft * VDOT_PER_WEEK) : null;
+  const goalPace = goalTimeS / (dist / 1000);
+  const splitEvery = dist <= 5000 ? 1000 : dist <= 10000 ? 2500 : 5000;
+  const splits: RaceGoal["splits"] = [];
+  for (let d = splitEvery; d < dist; d += splitEvery) splits.push({ label: `${d / 1000} km`, timeS: (d / 1000) * goalPace });
+  splits.push({ label: "Finish", timeS: goalTimeS });
+  return { target, distanceM: dist, goalTimeS, goalPace, currentTimeS: current, currentPace: current / (dist / 1000), vdotGap: gap, weeksLeft, weeksNeeded, verdict, realisticTimeS, splits };
+}
+
+/* ---------- Running sessions (one structure, used for the text and for watch workouts) ---------- */
+
+export interface RunBlock { type: "warmup" | "interval" | "recovery" | "cooldown"; seconds?: number; meters?: number; pace: [number, number]; label: string; detail: string }
+export interface RunRepeat { repeat: number; steps: RunBlock[] }
+export interface RunStructure { summary: string; blocks: (RunBlock | RunRepeat)[]; effort: string; distanceKm: number; note?: string; hrCap?: number }
+
+const PACE_WINDOW = 5;   // ± seconds per km around a single target pace
+
+export function runStructure(s: Session, key: string, goal: string, fit: Fitness): RunStructure | null {
+  if (!fit.run) return null;
+  const p = runPaces(fit.run.distanceM, fit.run.timeS);
+  const hr = fit.lthr ? hrZones(fit.lthr) : null;
+  const easy: [number, number] = [p.easy[1], p.easy[0]];   // fast, slow
+  const easyMid = (p.easy[0] + p.easy[1]) / 2;
+  const around = (x: number): [number, number] => [x - PACE_WINDOW, x + PACE_WINDOW];
+  const warm: RunBlock = { type: "warmup", seconds: 15 * 60, pace: easy, label: "Warm-up", detail: "15 min easy, then 4 × 20 s strides with 40 s walk" };
+  const cool: RunBlock = { type: "cooldown", seconds: 10 * 60, pace: easy, label: "Cool-down", detail: "10 min easy" };
+  const rg = raceGoal(goal, s.goalTimeS, s.goalDate, fit);
+  const racePhase = !!rg && rg.weeksLeft != null && rg.weeksLeft <= 6 && (rg.verdict === "in reach" || rg.verdict === "realistic");
+
+  if (key === "easy" || key === "light" || key === "long") {
+    const long = key === "long";
     return {
-      summary: `${s.minutes} min easy at ${easy}`,
-      steps: [{ label: "Main set", detail: `${s.minutes} min continuous`, target: `${easy}${hr ? ` · ${easyHr}` : ""}` }],
-      effort: "RPE 3–4, able to talk in full sentences",
+      summary: `${s.minutes} min ${long ? "long run" : "easy"} at ${paceRange(p.easy[0], p.easy[1])}`,
+      blocks: [{ type: "interval", seconds: s.minutes * 60, pace: easy, label: "Main set", detail: `${s.minutes} min continuous${long ? ", start at the slow end" : ""}` }],
+      effort: long ? "RPE 4, comfortable all the way" : "RPE 3–4, able to talk in full sentences",
       distanceKm: km(s.minutes, easyMid),
-    };
-  }
-  if (key === "long") {
-    return {
-      summary: `${s.minutes} min long run at ${easy}`,
-      steps: [{ label: "Main set", detail: `${s.minutes} min continuous, start at the slow end`, target: `${easy}${hr ? ` · ${easyHr}` : ""}` }],
-      effort: "RPE 4, comfortable all the way",
-      distanceKm: km(s.minutes, easyMid),
+      hrCap: hr?.z2[1],
     };
   }
   if (key === "tempo") {
+    if (racePhase && rg && goal !== "5k") {
+      const reps = goal === "marathon" ? 2 : 3, distM = goal === "marathon" ? 5000 : goal === "half" ? 3000 : 2000;
+      return {
+        summary: `${reps} × ${distM / 1000} km at goal pace ${fmtPace(rg.goalPace)} /km`,
+        blocks: [warm, { repeat: reps, steps: [
+          { type: "interval", meters: distM, pace: around(rg.goalPace), label: "Main set", detail: `${reps} × ${distM / 1000} km at your goal ${RACE_NAME[goal]} pace (${fmtTime((distM / 1000) * rg.goalPace)} each)` },
+          { type: "recovery", seconds: 180, pace: easy, label: "Recovery", detail: "3 min easy jog between reps" },
+        ] }, cool],
+        effort: "RPE 7, the effort you want to hold on race day",
+        distanceKm: km(25, easyMid) + (reps * distM) / 1000 + reps * 0.5,
+        note: `Race-specific: ${rg.weeksLeft} weeks to go, so one session a week practises goal pace.`,
+      };
+    }
     return {
       summary: `20 min at ${fmtPace(p.threshold)} /km`,
-      steps: [warm, { label: "Main set", detail: "20 min continuous at threshold", target: `${fmtPace(p.threshold)} /km${hr ? ` · HR ${hr.z4[0]}–${hr.z4[1]}` : ""}` }, cool],
+      blocks: [warm, { type: "interval", seconds: 20 * 60, pace: around(p.threshold), label: "Main set", detail: "20 min continuous at threshold" }, cool],
       effort: "RPE 7, comfortably hard, a few words at a time",
       distanceKm: km(25, easyMid) + (20 * 60) / p.threshold,
     };
   }
   // Intervals, specific to the race goal
-  const plans: Record<string, { reps: number; distM: number; pace: number; paceName: string; rest: string }> = {
-    "5k": { reps: 6, distM: 800, pace: p.interval, paceName: "interval pace", rest: "2 min easy jog" },
-    "10k": { reps: 6, distM: 1000, pace: p.race["10k"] / 10, paceName: "10 km race pace", rest: "90 s easy jog" },
-    half: { reps: 5, distM: 1000, pace: p.race["10k"] / 10, paceName: "10 km race pace", rest: "90 s easy jog" },
-    marathon: { reps: 3, distM: 3000, pace: p.marathon, paceName: "marathon pace", rest: "2 min easy jog" },
-    general: { reps: 8, distM: 0, pace: p.interval, paceName: "interval pace", rest: "1 min walk or jog" },
+  const plans: Record<string, { reps: number; distM: number; pace: number; paceName: string; restS: number; rest: string }> = {
+    "5k": { reps: 6, distM: 800, pace: p.interval, paceName: "interval pace", restS: 120, rest: "2 min easy jog" },
+    "10k": { reps: 6, distM: 1000, pace: p.race["10k"] / 10, paceName: "10 km race pace", restS: 90, rest: "90 s easy jog" },
+    half: { reps: 5, distM: 1000, pace: p.race["10k"] / 10, paceName: "10 km race pace", restS: 90, rest: "90 s easy jog" },
+    marathon: { reps: 3, distM: 3000, pace: p.marathon, paceName: "marathon pace", restS: 120, rest: "2 min easy jog" },
+    general: { reps: 8, distM: 0, pace: p.interval, paceName: "interval pace", restS: 60, rest: "1 min walk or jog" },
   };
-  const iv = plans[goal] ?? plans.general;
+  const iv = { ...(plans[goal] ?? plans.general) };
+  let note: string | undefined;
+  if (rg) {
+    const sameRace = (goal === "5k" || goal === "10k") && iv.paceName.includes("race");
+    if (racePhase && sameRace) { iv.pace = rg.goalPace; iv.paceName = "goal race pace"; }
+    else note = `Goal pace is ${fmtPace(rg.goalPace)} /km. Sessions use your current fitness (${fmtPace(rg.currentPace)} /km race pace) and move toward goal pace as you improve; update your 5 km time after a time trial.`;
+  }
   const repLabel = iv.distM ? `${iv.reps} × ${iv.distM >= 1000 ? `${iv.distM / 1000} km` : `${iv.distM} m`}` : `${iv.reps} × 1 min`;
   const repTime = iv.distM ? ` (${fmtTime((iv.distM / 1000) * iv.pace)} each)` : "";
+  const work: RunBlock = iv.distM
+    ? { type: "interval", meters: iv.distM, pace: around(iv.pace), label: "Main set", detail: `${repLabel} at ${iv.paceName}${repTime}` }
+    : { type: "interval", seconds: 60, pace: around(iv.pace), label: "Main set", detail: `${repLabel} at ${iv.paceName}` };
   return {
     summary: `${repLabel} at ${fmtPace(iv.pace)} /km`,
-    steps: [
-      warm,
-      { label: "Main set", detail: `${repLabel} at ${iv.paceName}${repTime}`, target: `${fmtPace(iv.pace)} /km${hr ? ` · HR up to ${hr.z5[0]}` : ""}` },
-      { label: "Recovery", detail: `${iv.rest} between reps`, target: easy },
-      cool,
-    ],
+    blocks: [warm, { repeat: iv.reps, steps: [work, { type: "recovery", seconds: iv.restS, pace: easy, label: "Recovery", detail: `${iv.rest} between reps` }] }, cool],
     effort: "RPE 8 on the reps, controlled not all-out",
     distanceKm: km(25, easyMid) + (iv.reps * (iv.distM || 250)) / 1000 + iv.reps * 0.2,
+    note,
   };
+}
+
+function runTargets(s: Session, key: string, goal: string, fit: Fitness): SessionTargets {
+  const hr = fit.lthr ? hrZones(fit.lthr) : null;
+  const st = runStructure(s, key, goal, fit);
+  if (!st) {
+    return {
+      summary: `${s.title}, ${s.minutes} min by feel`,
+      steps: [{ label: "Main set", detail: s.detail, target: hr ? `HR under ${hr.z2[1]}` : "RPE from the effort line" }],
+      effort: s.kind === "hard" ? "RPE 8 on the hard parts" : "RPE 3–4, able to talk in full sentences",
+      note: "Add a recent 5 km time or time trial on the Goals screen to get exact paces.",
+    };
+  }
+  const isRange = (b: RunBlock) => b.pace[1] - b.pace[0] > 2 * PACE_WINDOW;
+  const paceText = (b: RunBlock) => isRange(b) ? paceRange(b.pace[1], b.pace[0]) : `${fmtPace((b.pace[0] + b.pace[1]) / 2)} /km`;
+  const steps: Step[] = [];
+  const add = (b: RunBlock) => {
+    let target = paceText(b);
+    if (b.type === "interval" && hr) target += isRange(b) ? ` · HR under ${hr.z2[1]}` : key === "tempo" && !b.meters ? ` · HR ${hr.z4[0]}–${hr.z4[1]}` : "";
+    steps.push({ label: b.label, detail: b.detail, target });
+  };
+  for (const b of st.blocks) "repeat" in b ? b.steps.forEach(add) : add(b);
+  return { summary: st.summary, steps, effort: st.effort, distanceKm: st.distanceKm, note: st.note };
 }
 
 function rideTargets(s: Session, key: string, fit: Fitness): SessionTargets {

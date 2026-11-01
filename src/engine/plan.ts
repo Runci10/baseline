@@ -10,6 +10,7 @@ export interface SportGoal {
   id: SportId;
   target: string;     // key from SPORTS[id].targets
   date?: string;      // optional event date, YYYY-MM-DD
+  targetTimeS?: number; // optional race goal time in seconds (event targets only)
 }
 
 export interface Profile {
@@ -42,6 +43,8 @@ export interface Session {
   met: number;        // energy cost, used by the nutrition engine
   key?: string;       // session type within its sport (easy, hard, tempo, long, vo2, lower, upper, full, light)
   goal?: string;      // the goal target this session serves (e.g. "10k"), used for exact targets
+  goalTimeS?: number; // race goal time for that target, if set
+  goalDate?: string;  // race date for that target, if set
   priority?: number;
   light?: Session;    // easier version used when readiness is low
   moved?: boolean;
@@ -226,7 +229,8 @@ export function buildWeek(g: Goals, input: WeekInputs): WeekResult {
     if (!counts[i]) return;
     const L = library(x.id, x.target, g.minutes);
     L.order[counts[i] - 1].forEach(key => sessions.push({
-      ...(L[key] as Session), key, goal: x.target, priority: i, light: { ...L.light, key: "light", goal: x.target },
+      ...(L[key] as Session), key, goal: x.target, goalTimeS: x.targetTimeS, goalDate: x.date, priority: i,
+      light: { ...L.light, key: "light", goal: x.target, goalTimeS: x.targetTimeS, goalDate: x.date },
     }));
   });
 

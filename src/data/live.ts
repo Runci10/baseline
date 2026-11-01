@@ -105,7 +105,7 @@ export const TODAY: TodayData = fromGarmin(g) ?? {
 export const sleepAvg7 = TODAY.sleepHours.reduce((a, b) => a + b, 0) / TODAY.sleepHours.length;
 
 /** Fitness for session targets: your settings, with threshold heart rate from Garmin's zones when synced. */
-export const FITNESS: Fitness = { ...FITNESS_SETTINGS, lthr: g.zones?.lthr ?? FITNESS_SETTINGS.lthr };
+export const FITNESS: Fitness = { ...FITNESS_SETTINGS, lthr: g.zones?.lthr ?? FITNESS_SETTINGS.lthr, asOf: TODAY.date };
 
 /** Latest weight from Garmin, if any. */
 export const LATEST_WEIGHT = g.weights?.length ? g.weights[g.weights.length - 1] : null;
