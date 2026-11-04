@@ -254,8 +254,9 @@ export function buildWeek(g: Goals, input: WeekInputs): WeekResult {
   else if (readiness < 67) { scale = 0.85; notes.push({ kind: "warn", text: `Readiness is ${readiness}. Volume is trimmed 15% and hard sessions move off the next two days.` }); }
   if (sleepAvg7 < 6) notes.push({ kind: "warn", text: `You've averaged ${sleepAvg7.toFixed(1)} h of sleep this week, so the first two days stay easy.` });
   if (loadRatio < 0.8 && readiness >= 67 && sleepAvg7 >= 6) { scale = 1.1; notes.push({ kind: "info", text: "Recent load is below your fitness level, so endurance volume rises 10%." }); }
+  if (loadRatio > 1.5) { scale = Math.min(scale, 0.8); notes.push({ kind: "warn", text: `Training load is ${loadRatio.toFixed(1)}× your usual, above 1.5, so volume drops at least 20% and hard sessions wait until it settles.` }); }
 
-  const protect = readiness < 67 || sleepAvg7 < 6 ? 2 : 0;
+  const protect = readiness < 67 || sleepAvg7 < 6 || loadRatio > 1.5 ? 2 : 0;
   for (let d = 0; d < protect; d++) {
     const s = week[d];
     if (!s || !isHeavy(s)) continue;
