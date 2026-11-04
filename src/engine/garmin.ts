@@ -80,3 +80,44 @@ export function garminStrengthExercises(s: Session | null, goalTarget: string, f
       };
     });
 }
+
+/* Garmin needs a known exercise category on each strength step (custom names are rejected). */
+const STRENGTH_CATEGORY: [RegExp, string, string][] = [
+  [/split squat|bulgarian|lunge|step-up/i, "LUNGE", "SPLIT_SQUAT"],
+  [/squat/i, "SQUAT", "BODY_WEIGHT_SQUAT"],
+  [/pike|shoulder press|overhead press/i, "SHOULDER_PRESS", "OVERHEAD_PRESS"],
+  [/push-up|floor press|bench/i, "PUSH_UP", "PUSH_UP"],
+  [/pull-up/i, "PULL_UP", "PULL_UP"],
+  [/row/i, "ROW", "INVERTED_ROW"],
+  [/glute bridge|hip raise/i, "HIP_RAISE", "SINGLE_LEG_HIP_RAISE"],
+  [/romanian|deadlift|nordic/i, "DEADLIFT", "ROMANIAN_DEADLIFT"],
+  [/dip/i, "TRICEPS_EXTENSION", "BODY_WEIGHT_DIP"],
+  [/calf/i, "CALF_RAISE", "SINGLE_LEG_STANDING_CALF_RAISE"],
+  [/plank/i, "PLANK", "PLANK"],
+];
+
+/** Garmin strength workout JSON (sport 5): each exercise is a repeat of work + rest. */
+export function garminStrengthWorkout(s: Session | null, goalTarget: string, fit: Fitness, name?: string) {
+  const ex = garminStrengthExercises(s, goalTarget, fit);
+  if (!s || !ex) return null;
+  const sport = { sportTypeId: 5, sportTypeKey: "strength_training" };
+  const none = { workoutTargetTypeId: 1, workoutTargetTypeKey: "no.target" };
+  let order = 0;
+  const steps = ex.map(e => {
+    const [, category, exerciseName] = STRENGTH_CATEGORY.find(([re]) => re.test(e.name)) ?? [null, "PLANK", "PLANK"];
+    const timed = /plank/i.test(e.name);
+    const groupOrder = ++order;
+    return {
+      type: "RepeatGroupDTO", stepOrder: groupOrder, stepType: STEP_TYPE.repeat, numberOfIterations: e.sets,
+      endCondition: { conditionTypeId: 7, conditionTypeKey: "iterations" }, endConditionValue: e.sets,
+      workoutSteps: [
+        { type: "ExecutableStepDTO", stepOrder: ++order, stepType: STEP_TYPE.interval, description: e.name.slice(0, 100),
+          endCondition: timed ? { conditionTypeId: 2, conditionTypeKey: "time" } : { conditionTypeId: 10, conditionTypeKey: "reps" },
+          endConditionValue: e.reps, targetType: none, category, exerciseName },
+        { type: "ExecutableStepDTO", stepOrder: ++order, stepType: { stepTypeId: 5, stepTypeKey: "rest" },
+          endCondition: { conditionTypeId: 2, conditionTypeKey: "time" }, endConditionValue: e.rest_seconds, targetType: none },
+      ],
+    };
+  });
+  return { workoutName: (name ?? `Baseline: ${s.title}`).slice(0, 80), sportType: sport, workoutSegments: [{ segmentOrder: 1, sportType: sport, workoutSteps: steps }] };
+}
