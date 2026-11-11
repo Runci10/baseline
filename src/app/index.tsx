@@ -149,7 +149,7 @@ export default function TodayScreen() {
 
 const styles = (c: Palette) =>
   StyleSheet.create({
-    page: { padding: 16, paddingTop: 24, paddingBottom: 120, gap: 14 },
+    page: { padding: 16, paddingTop: 24, paddingBottom: 120, gap: 14, width: "100%", maxWidth: 820, alignSelf: "center" },
     title: { fontSize: 28, fontWeight: "700", color: c.fg },
     h2: { fontSize: 18, fontWeight: "600", color: c.fg },
     body: { fontSize: 15, lineHeight: 21, color: c.fg },
